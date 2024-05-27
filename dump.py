@@ -3,137 +3,9 @@ from datetime import datetime
 import sys
 from typing import Self
 
-
-def parse_int(data: bytes) -> int:
-    return int.from_bytes(data, "little")
-
-
-def hexdump(data: bytes, offset: int, length: int):
-    p = (offset // 16) * 16
-    lines = []
-    while p < offset + length:
-        s = f"{p:08x} "
-        for i in range(0, 8):
-            if offset <= p + i < offset + length:
-                s += f" {data[p + i]:02x}"
-            else:
-                s += "   "
-        s += " "
-        for i in range(8, 16):
-            if offset <= p + i < offset + length:
-                s += f" {data[p + i]:02x}"
-            else:
-                s += "   "
-
-        s += "  |"
-        for i in range(16):
-            if offset <= p + i < offset + length:
-                b = data[p + i]
-                if 0x20 <= b < 0x7F:
-                    s += chr(b)
-                else:
-                    s += "."
-            else:
-                s += " "
-        s += "|"
-
-        lines.append(s)
-
-        p += 16
-
-    return "\n".join(lines)
-
-
-CHARACTERISTICS = [
-    (0x0001, "RELOCS_STRIPPED"),
-    (0x0002, "EXECUTABLE_IMAGE"),
-    (0x0004, "LINE_NUMS_STRIPPED"),
-    (0x0008, "LOCAL_SYMS_STRIPPED"),
-    (0x0010, "AGGRESSIVE_WS_TRIM"),
-    (0x0020, "LARGE_ADDRESS_AWARE"),
-    (0x0040, "RESERVED"),
-    (0x0080, "BYTES_REVERSED_LO"),
-    (0x0100, "32BIT_MACHINE"),
-    (0x0200, "DEBUG_STRIPPED"),
-    (0x0400, "REMOVABLE_RUN_FROM_SWAP"),
-    (0x0800, "NET_RUN_FROM_SWAP"),
-    (0x1000, "SYSTEM"),
-    (0x2000, "DLL"),
-    (0x4000, "UP_SYSTEM_ONLY"),
-    (0x8000, "BYTES_REVERSED_HI"),
-]
-
-MACHINES = {
-    0x0: "MACHINE_UNKNOWN",
-    0x184: "MACHINE_ALPHA",
-    0x284: "MACHINE_ALPHA64",
-    0x1D3: "MACHINE_AM33",
-    0x8664: "MACHINE_AMD64",
-    0x1C0: "MACHINE_ARM",
-    0xAA64: "MACHINE_ARM64",
-    0x1C4: "MACHINE_ARMNT",
-    0x284: "MACHINE_AXP64",
-    0xEBC: "MACHINE_EBC",
-    0x14C: "MACHINE_I386",
-    0x200: "MACHINE_IA64",
-    0x6232: "MACHINE_LOONGARCH32",
-    0x6264: "MACHINE_LOONGARCH64",
-    0x9041: "MACHINE_M32R",
-    0x266: "MACHINE_MIPS16",
-    0x366: "MACHINE_MIPSFPU",
-    0x466: "MACHINE_MIPSFPU16",
-    0x1F0: "MACHINE_POWERPC",
-    0x1F1: "MACHINE_POWERPCFP",
-    0x166: "MACHINE_R4000",
-    0x5032: "MACHINE_RISCV32",
-    0x5064: "MACHINE_RISCV64",
-    0x5128: "MACHINE_RISCV128",
-    0x1A2: "MACHINE_SH3",
-    0x1A3: "MACHINE_SH3DSP",
-    0x1A6: "MACHINE_SH4",
-    0x1A8: "MACHINE_SH5",
-    0x1C2: "MACHINE_THUMB",
-    0x169: "MACHINE_WCEMIPSV2",
-}
-
-
-@dataclass
-class CoffHeader:
-    machine: int
-    number_of_sections: int
-    time_date_stamp: int
-    pointer_to_symbol_table: int
-    number_of_symbols: int
-    size_of_optional_header: int
-    characteristics: int
-
-    @staticmethod
-    def parse(data: bytes) -> Self:
-        return CoffHeader(
-            machine=parse_int(data[0:2]),
-            number_of_sections=parse_int(data[2:4]),
-            time_date_stamp=parse_int(data[4:8]),
-            pointer_to_symbol_table=parse_int(data[8:12]),
-            number_of_symbols=parse_int(data[12:16]),
-            size_of_optional_header=parse_int(data[16:18]),
-            characteristics=parse_int(data[18:20]),
-        )
-
-    def print_characteristics(self):
-        selected = []
-        for flag, name in CHARACTERISTICS:
-            if self.characteristics & flag:
-                selected.append(name)
-        return " | ".join(selected)
-
-    def __str__(self):
-        return f"""Machine: 0x{self.machine:02x}  {MACHINES.get(self.machine)}
-NumberOfSections: {self.number_of_sections}
-TimeDateStamp: {datetime.fromtimestamp(self.time_date_stamp)}
-PointerToSymbolTable: {self.pointer_to_symbol_table:08x}
-NumberOfSymbols: {self.number_of_symbols}
-SizeOfOptionalHeader: {self.size_of_optional_header:04x}
-Characteristics: {self.characteristics:04x}  {self.print_characteristics()}"""
+from hexdump import hexdump
+from parse import parse_int, parse_c_string
+from pe import CoffHeader
 
 
 @dataclass
@@ -477,11 +349,6 @@ Import Address Table RVA: {self.address_table_rva:08x}
         )
 
 
-def parse_c_string(data: bytes, start: int) -> str:
-    end = data.index(0, start)
-    return data[start:end].decode()
-
-
 @dataclass
 class ImportHint:
     def __init__(self, hint: int, name: str | None):
@@ -638,6 +505,7 @@ print()
 coff = CoffHeader.parse(bin[pe_offset + 4 : pe_offset + 24])
 print(coff)
 print()
+assert coff.to_bytes() == bin[pe_offset + 4 : pe_offset + 24]
 
 optional_header_offset = pe_offset + 24
 pe_magic = int.from_bytes(
