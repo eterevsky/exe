@@ -305,7 +305,7 @@ class SectionHeader:
     def __str__(self):
         return f"""Name: {self.name}
 Virtual addresses: {self.virtual_address:08x}-{self.virtual_address+self.virtual_size:08x} ({self.virtual_size})
-Raw data: {self.pointer_to_raw_data:08x}-{self.pointer_to_raw_data+self.size_of_raw_data:08x} ({self.size_of_raw_data}) 
+Raw data: {self.pointer_to_raw_data:08x}-{self.pointer_to_raw_data+self.size_of_raw_data:08x} ({self.size_of_raw_data})
 Relocations: {self.pointer_to_relocations:08x} ({self.number_of_relocations})
 Line numbers: {self.pointer_to_line_numbers:08x} ({self.number_of_line_numbers})
 Characteristicts: {self.characteristics:08x} {self.print_characteristics()}
@@ -354,7 +354,7 @@ class ImportHint:
     def __init__(self, hint: int, name: str | None):
         self.hint = hint
         self.name = name
-    
+
     @staticmethod
     def parse(memory: bytes, offset: int) -> Self:
         # print(hexdump(memory, offset, 32))
@@ -375,7 +375,7 @@ class DllLookupTable:
         self.directory_entry = directory_entry
         self.name = name
         self.imports: list[ImportHint] = []
-    
+
     @staticmethod
     def parse(entry_data: bytes, memory: bytes):
         entry = ImportDirectoryEntry.parse(entry_data)
@@ -399,7 +399,7 @@ class DllLookupTable:
             lookup_rva += 8
 
         return table
-    
+
     def __str__(self):
         s = self.name + "\n"  # + str(self.directory_entry)
         s += f"IAT: {self.directory_entry.address_table_rva:08x}\n\n"
@@ -433,7 +433,7 @@ class RelocationBlock:
         for offset in range(8, len(data), 2):
             block.entries.append(parse_int(data[offset:offset+2]))
         return block
-    
+
     def __str__(self):
         s = f"Block RVA {self.page_rva:08x}:"
         for i, entry in enumerate(self.entries):
@@ -450,7 +450,7 @@ class RelocationBlock:
 class Relocations:
     def __init__(self):
         self.blocks: list[RelocationBlock] = []
-    
+
     @staticmethod
     def parse(data: bytes) -> Self:
         relocations = Relocations()
@@ -465,7 +465,7 @@ class Relocations:
     def __str__(self) -> str:
         s = "\n".join(str(b) for b in self.blocks)
         return s + "\n"
-            
+
 
 def load_sections(sections: list[SectionHeader], bin: bytes) -> bytes:
     """Emulate loading the application into memory by following section headers."""
@@ -479,156 +479,185 @@ def load_sections(sections: list[SectionHeader], bin: bytes) -> bytes:
     return bytes(memory)
 
 
+def dump_pe32(bin: bytes):
+    pe_offset = parse_int(bin[0x3C:0x40])
+    print(f"PE offset ({pe_offset:08x}):")
+    print(hexdump(bin, 0x3C, 4))
+    print()
+
+    print("MS-DOS Stub:")
+    print(hexdump(bin, 0, pe_offset))
+    print()
+
+    print("Signature (expected: 50 45 00 00):")
+    print(hexdump(bin, pe_offset, 4))
+    print()
+
+    print("COFF File Header:")
+    print(hexdump(bin, pe_offset + 4, 20))
+    print()
+
+    coff = CoffHeader.parse(bin[pe_offset + 4 : pe_offset + 24])
+    print(coff)
+    print()
+    assert coff.to_bytes() == bin[pe_offset + 4 : pe_offset + 24]
+
+    optional_header_offset = pe_offset + 24
+    pe_magic = int.from_bytes(
+        bin[optional_header_offset : optional_header_offset + 2], "little"
+    )
+    if pe_magic not in (0x10B, 0x20B):
+        print(f"PE Magic Number: {pe_magic:04x} - unsupported")
+        exit(0)
+    print(f"PE Magic Number: {pe_magic:04x}", "PE32" if pe_magic == 0x10B else "PE32+")
+    print()
+
+    if pe_magic == 0x10B:
+        optional_standard_length = 28
+        optional_windows_offset = optional_header_offset + 28
+        optional_windows_length = 68
+        optional_data_offset = optional_header_offset + 96
+        optional_data_length = coff.size_of_optional_header - 96
+    else:
+        optional_standard_length = 24
+        optional_windows_offset = optional_header_offset + 24
+        optional_windows_length = 88
+        optional_data_offset = optional_header_offset + 112
+        optional_data_length = coff.size_of_optional_header - 112
+
+    print("Optional Header Standard Fields:")
+    print(hexdump(bin, optional_header_offset, optional_standard_length))
+    print()
+    optional_standard = OptionalStandard.parse(
+        bin[optional_header_offset : optional_header_offset + optional_standard_length]
+    )
+    print(optional_standard)
+
+    print("Optional Header Windows-Specific Fields:")
+    print(hexdump(bin, optional_windows_offset, optional_windows_length))
+    print()
+    optional_windows = OptionalWindows.parse(
+        bin[optional_windows_offset : optional_windows_offset + optional_windows_length]
+    )
+    print(optional_windows)
+
+    assert optional_windows.number_of_rva_and_sizes * 8 == optional_data_length
+
+    print("Optional Header Data Directories:")
+    print(hexdump(bin, optional_data_offset, optional_data_length))
+    print()
+    directories = DataDirectories.parse(
+        bin[optional_data_offset : optional_data_offset + optional_data_length]
+    )
+    print(directories)
+
+    sections = []
+    current_offset = optional_data_offset + optional_data_length
+    for isection in range(0, coff.number_of_sections):
+        section = SectionHeader.parse(bin[current_offset : current_offset + 40])
+        sections.append(section)
+        print(section.name, "header:")
+        print(hexdump(bin, current_offset, 40))
+        print()
+        print(section)
+        current_offset += 40
+
+    memory = load_sections(sections, bin)
+    print("Used memory:", len(memory))
+    print()
+
+    idata_addr = directories.find(".idata")
+    print(".idata")
+    print(hexdump(memory, idata_addr.virtual_address, idata_addr.size))
+    print()
+
+    imports_table = []
+
+    for start in range(
+        idata_addr.virtual_address, idata_addr.virtual_address + idata_addr.size, 20
+    ):
+        dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
+        if dll_table is None:
+            break
+        print(dll_table)
+        imports_table.append(dll_table)
+
+
+    # iat_addr = directories.find("IAT")
+    # print("IAT")
+    # print(hexdump(memory, iat_addr.virtual_address, iat_addr.size))
+    # print()
+
+    # iat_table = []
+
+    # for start in range(
+    #     iat_addr.virtual_address, iat_addr.virtual_address + iat_addr.size, 20
+    # ):
+    #     dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
+    #     if dll_table is None:
+    #         break
+    #     print(dll_table)
+    #     iat_table.append(dll_table)
+
+
+    pdata_addr = directories.find(".pdata")
+    print(".pdata\n")
+    # print(hexdump(memory, pdata_addr.virtual_address, pdata_addr.size))
+    exceptions_table = []
+
+    offset = pdata_addr.virtual_address
+    print("begin     end       unwind")
+    while offset < pdata_addr.virtual_address + pdata_addr.size:
+        begin = parse_int(memory[offset:offset+4])
+        end = parse_int(memory[offset+4:offset+8])
+        unwind = parse_int(memory[offset+8:offset+12])
+        print(f"{begin:08x}  {end:08x}  {unwind:08x}")
+        offset += 12
+
+        if offset - pdata_addr.virtual_address > 48:
+            print(". . .")
+            break
+
+    print()
+
+    reloc_addr = directories.find(".reloc")
+    print(".reloc")
+    # print(hexdump(memory, reloc_addr.virtual_address, reloc_addr.size))
+    print()
+
+    relocations = Relocations.parse(memory[reloc_addr.virtual_address: reloc_addr.virtual_address + reloc_addr.size])
+    print(relocations)
+
+
+def is_pe32(bin):
+    if len(bin) < 0x40:
+        return False
+    pe_offset = parse_int(bin[0x3C:0x40])
+    if len(bin) < pe_offset + 4:
+        return False
+    return bin[pe_offset:pe_offset+4] == b"PE\x00\x00"
+
+
+def is_macho(bin):
+    if len(bin) < 4:
+        return False
+    magic = parse_int(bin[:4])
+    return magic == 0xfeedfacf
+
+
+def dump_macho(bin: bytes):
+    print("Header")
+    print(hexdump(bin, 0, 0x20))
+
+
+
 with open(sys.argv[1], "rb") as f:
     bin = f.read()
 
 print(f"Total length: {len(bin)}")
 print()
 
-pe_offset = parse_int(bin[0x3C:0x40])
-print(f"PE offset ({pe_offset:08x}):")
-print(hexdump(bin, 0x3C, 4))
-print()
-
-print("MS-DOS Stub:")
-print(hexdump(bin, 0, pe_offset))
-print()
-
-print("Signature (expected: 50 45 00 00):")
-print(hexdump(bin, pe_offset, 4))
-print()
-
-print("COFF File Header:")
-print(hexdump(bin, pe_offset + 4, 20))
-print()
-
-coff = CoffHeader.parse(bin[pe_offset + 4 : pe_offset + 24])
-print(coff)
-print()
-assert coff.to_bytes() == bin[pe_offset + 4 : pe_offset + 24]
-
-optional_header_offset = pe_offset + 24
-pe_magic = int.from_bytes(
-    bin[optional_header_offset : optional_header_offset + 2], "little"
-)
-if pe_magic not in (0x10B, 0x20B):
-    print(f"PE Magic Number: {pe_magic:04x} - unsupported")
-    exit(0)
-print(f"PE Magic Number: {pe_magic:04x}", "PE32" if pe_magic == 0x10B else "PE32+")
-print()
-
-if pe_magic == 0x10B:
-    optional_standard_length = 28
-    optional_windows_offset = optional_header_offset + 28
-    optional_windows_length = 68
-    optional_data_offset = optional_header_offset + 96
-    optional_data_length = coff.size_of_optional_header - 96
-else:
-    optional_standard_length = 24
-    optional_windows_offset = optional_header_offset + 24
-    optional_windows_length = 88
-    optional_data_offset = optional_header_offset + 112
-    optional_data_length = coff.size_of_optional_header - 112
-
-print("Optional Header Standard Fields:")
-print(hexdump(bin, optional_header_offset, optional_standard_length))
-print()
-optional_standard = OptionalStandard.parse(
-    bin[optional_header_offset : optional_header_offset + optional_standard_length]
-)
-print(optional_standard)
-
-print("Optional Header Windows-Specific Fields:")
-print(hexdump(bin, optional_windows_offset, optional_windows_length))
-print()
-optional_windows = OptionalWindows.parse(
-    bin[optional_windows_offset : optional_windows_offset + optional_windows_length]
-)
-print(optional_windows)
-
-assert optional_windows.number_of_rva_and_sizes * 8 == optional_data_length
-
-print("Optional Header Data Directories:")
-print(hexdump(bin, optional_data_offset, optional_data_length))
-print()
-directories = DataDirectories.parse(
-    bin[optional_data_offset : optional_data_offset + optional_data_length]
-)
-print(directories)
-
-sections = []
-current_offset = optional_data_offset + optional_data_length
-for isection in range(0, coff.number_of_sections):
-    section = SectionHeader.parse(bin[current_offset : current_offset + 40])
-    sections.append(section)
-    print(section.name, "header:")
-    print(hexdump(bin, current_offset, 40))
-    print()
-    print(section)
-    current_offset += 40
-
-memory = load_sections(sections, bin)
-print("Used memory:", len(memory))
-print()
-
-idata_addr = directories.find(".idata")
-print(".idata")
-print(hexdump(memory, idata_addr.virtual_address, idata_addr.size))
-print()
-
-imports_table = []
-
-for start in range(
-    idata_addr.virtual_address, idata_addr.virtual_address + idata_addr.size, 20
-):
-    dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
-    if dll_table is None:
-        break
-    print(dll_table)
-    imports_table.append(dll_table)
-
-
-# iat_addr = directories.find("IAT")
-# print("IAT")
-# print(hexdump(memory, iat_addr.virtual_address, iat_addr.size))
-# print()
-
-# iat_table = []
-
-# for start in range(
-#     iat_addr.virtual_address, iat_addr.virtual_address + iat_addr.size, 20
-# ):
-#     dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
-#     if dll_table is None:
-#         break
-#     print(dll_table)
-#     iat_table.append(dll_table)
-
-
-pdata_addr = directories.find(".pdata")
-print(".pdata\n")
-# print(hexdump(memory, pdata_addr.virtual_address, pdata_addr.size))
-exceptions_table = []
-
-offset = pdata_addr.virtual_address
-print("begin     end       unwind")
-while offset < pdata_addr.virtual_address + pdata_addr.size:
-    begin = parse_int(memory[offset:offset+4])
-    end = parse_int(memory[offset+4:offset+8])
-    unwind = parse_int(memory[offset+8:offset+12])
-    print(f"{begin:08x}  {end:08x}  {unwind:08x}")
-    offset += 12
-
-    if offset - pdata_addr.virtual_address > 48:
-        print(". . .")
-        break
-
-print()
-
-reloc_addr = directories.find(".reloc")
-print(".reloc")
-# print(hexdump(memory, reloc_addr.virtual_address, reloc_addr.size))
-print()
-
-relocations = Relocations.parse(memory[reloc_addr.virtual_address: reloc_addr.virtual_address + reloc_addr.size])
-print(relocations)
+if is_pe32(bin):
+    dump_pe32(bin)
+elif is_macho(bin):
+    dump_macho(bin)
