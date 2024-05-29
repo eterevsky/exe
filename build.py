@@ -7,6 +7,7 @@ MZ_PREAMBLE = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00\x8b\x
 
 PE_SIGNATURE = b"PE\x00\x00"
 
+# Need to populate `size_of_optional_header` later
 coff = pe.CoffHeader(
     machine=pe.MachineType.IMAGE_FILE_MACHINE_AMD64,
     number_of_sections=1,
@@ -16,6 +17,26 @@ coff = pe.CoffHeader(
     | pe.Characteristics.IMAGE_FILE_LARGE_ADDRESS_AWARE,
 )
 
-bin = MZ_PREAMBLE + PE_SIGNATURE + coff.to_bytes()
+optional_standard = pe.OptionalHeaderStandard()
 
-print(hexdump(bin, 0, len(bin)))
+print("MS-DOS stub")
+print(hexdump(MZ_PREAMBLE))
+print()
+
+bin = MZ_PREAMBLE
+l = len(bin)
+bin += PE_SIGNATURE
+print("PE signature")
+print(hexdump(bin, l))
+print()
+
+l = len(bin)
+bin += coff.to_bytes()
+print("COFF")
+print(hexdump(bin, l))
+print()
+
+l = len(bin)
+bin += optional_standard.to_bytes()
+print("Optional Header Standard Fields")
+print(hexdump(bin, l))

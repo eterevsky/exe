@@ -5,42 +5,7 @@ from typing import Self
 
 from hexdump import hexdump
 from parse import parse_int, parse_c_string
-from pe import CoffHeader
-
-
-@dataclass
-class OptionalStandard:
-    magic: int
-    major_linker_version: int
-    minor_linker_version: int
-    size_of_code: int
-    size_of_initialized_data: int
-    size_of_uninitialized_data: int
-    address_of_entry_point: int
-    base_of_code: int
-
-    @staticmethod
-    def parse(data: bytes) -> Self:
-        return OptionalStandard(
-            magic=parse_int(data[0:2]),
-            major_linker_version=data[2],
-            minor_linker_version=data[3],
-            size_of_code=parse_int(data[4:8]),
-            size_of_initialized_data=parse_int(data[8:12]),
-            size_of_uninitialized_data=parse_int(data[12:16]),
-            address_of_entry_point=parse_int(data[16:20]),
-            base_of_code=parse_int(data[20:24]),
-        )
-
-    def __str__(self):
-        return f"""Magic: {self.magic:02x}
-Linker version: {self.major_linker_version}.{self.minor_linker_version}
-SizeOfCode: {self.size_of_code:08x} ({self.size_of_code})
-SizeOfInitializedData: {self.size_of_initialized_data:08x} ({self.size_of_initialized_data})
-SizeOfUninitializedData: {self.size_of_uninitialized_data:08x} ({self.size_of_uninitialized_data})
-AddressOfEntryPoint: {self.address_of_entry_point:08x}
-BaseOfCode: {self.base_of_code:08x}
-"""
+from pe import CoffHeader, OptionalHeaderStandard
 
 
 SUBSYSTEMS = {
@@ -503,35 +468,27 @@ def dump_pe32(bin: bytes):
     assert coff.to_bytes() == bin[pe_offset + 4 : pe_offset + 24]
 
     optional_header_offset = pe_offset + 24
-    pe_magic = int.from_bytes(
-        bin[optional_header_offset : optional_header_offset + 2], "little"
-    )
-    if pe_magic not in (0x10B, 0x20B):
-        print(f"PE Magic Number: {pe_magic:04x} - unsupported")
+    optional_standard = OptionalHeaderStandard.parse(bin, optional_header_offset)
+    print("Optional Header Standard Fields:")
+    print(hexdump(bin, optional_header_offset, optional_standard.size))
+    print()
+    print(optional_standard)
+
+    if optional_standard.magic not in (0x10B, 0x20B):
+        print(f"PE Magic Number: {optional_standard.magic:04x} - unsupported")
         exit(0)
-    print(f"PE Magic Number: {pe_magic:04x}", "PE32" if pe_magic == 0x10B else "PE32+")
     print()
 
-    if pe_magic == 0x10B:
-        optional_standard_length = 28
-        optional_windows_offset = optional_header_offset + 28
+    optional_windows_offset = optional_header_offset + optional_standard.size
+
+    if optional_standard.magic == 0x10B:
         optional_windows_length = 68
         optional_data_offset = optional_header_offset + 96
         optional_data_length = coff.size_of_optional_header - 96
     else:
-        optional_standard_length = 24
-        optional_windows_offset = optional_header_offset + 24
         optional_windows_length = 88
         optional_data_offset = optional_header_offset + 112
         optional_data_length = coff.size_of_optional_header - 112
-
-    print("Optional Header Standard Fields:")
-    print(hexdump(bin, optional_header_offset, optional_standard_length))
-    print()
-    optional_standard = OptionalStandard.parse(
-        bin[optional_header_offset : optional_header_offset + optional_standard_length]
-    )
-    print(optional_standard)
 
     print("Optional Header Windows-Specific Fields:")
     print(hexdump(bin, optional_windows_offset, optional_windows_length))

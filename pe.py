@@ -4,6 +4,8 @@ from enum import Enum, Flag
 import struct
 from typing import Self
 
+from parse import parse_int
+
 
 class MachineType(Enum):
     IMAGE_FILE_MACHINE_UNKNOWN = 0x0
@@ -106,4 +108,70 @@ Characteristics: {self.characteristics}"""
             self.number_of_symbols,
             self.size_of_optional_header,
             self.characteristics.value,
+        )
+
+
+@dataclass
+class OptionalHeaderStandard:
+    start_offset: int = 0
+    magic: int = 0x020B
+    major_linker_version: int = 0
+    minor_linker_version: int = 1
+    size_of_code: int = 0
+    size_of_initialized_data: int = 0
+    size_of_uninitialized_data: int = 0
+    address_of_entry_point: int = 0
+    base_of_code: int = 0
+
+    @staticmethod
+    def parse(bin: bytes, offset: int) -> Self:
+        (
+            magic,
+            major_linker_version,
+            minor_linker_version,
+            size_of_code,
+            size_of_initialized_data,
+            size_of_uninitialized_data,
+            address_of_entry_point,
+            base_of_code,
+        ) = struct.unpack("HBBIIIII", bin[offset : offset + 24])
+
+        return OptionalHeaderStandard(
+            start_offset=offset,
+            magic=magic,
+            major_linker_version=major_linker_version,
+            minor_linker_version=minor_linker_version,
+            size_of_code=size_of_code,
+            size_of_initialized_data=size_of_initialized_data,
+            size_of_uninitialized_data=size_of_uninitialized_data,
+            address_of_entry_point=address_of_entry_point,
+            base_of_code=base_of_code,
+        )
+
+    def __str__(self):
+        return f"""Magic: {self.magic:04x}
+Linker version: {self.major_linker_version}.{self.minor_linker_version}
+SizeOfCode: {self.size_of_code:08x} ({self.size_of_code})
+SizeOfInitializedData: {self.size_of_initialized_data:08x} ({self.size_of_initialized_data})
+SizeOfUninitializedData: {self.size_of_uninitialized_data:08x} ({self.size_of_uninitialized_data})
+AddressOfEntryPoint: {self.address_of_entry_point:08x}
+BaseOfCode: {self.base_of_code:08x}
+"""
+
+    @property
+    def size(self):
+        return 24 if self.magic == 0x020B else 28
+
+    def to_bytes(self) -> bytes:
+        assert self.magic == 0x020B
+        return struct.pack(
+            "HBBIIIII",
+            self.magic,
+            self.major_linker_version,
+            self.minor_linker_version,
+            self.size_of_code,
+            self.size_of_initialized_data,
+            self.size_of_uninitialized_data,
+            self.address_of_entry_point,
+            self.base_of_code,
         )

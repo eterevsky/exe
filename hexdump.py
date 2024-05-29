@@ -1,4 +1,6 @@
-def hexdump(data: bytes, offset: int, length: int):
+def hexdump(data: bytes, offset: int = 0, length: int = None):
+    if length is None:
+        length = len(data) - offset
     p = (offset // 16) * 16
     lines = []
     while p < offset + length:
