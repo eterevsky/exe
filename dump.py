@@ -6,6 +6,7 @@ from typing import Self
 from hexdump import hexdump
 from parse import parse_int, parse_c_string
 from pe import CoffHeader, OptionalHeaderStandard, OptionalHeaderWindows
+from mz import MzHeader
 
 
 @dataclass
@@ -206,7 +207,7 @@ class ImportHint:
 
     @staticmethod
     def parse(memory: bytes, offset: int) -> Self:
-        # print(hexdump(memory, offset, 32))
+        # hexdump(memory, offset, 32)
         # print()
         hint = parse_int(memory[offset:offset+2])
         name = parse_c_string(memory, offset+2)
@@ -331,19 +332,19 @@ def load_sections(sections: list[SectionHeader], bin: bytes) -> bytes:
 def dump_pe32(bin: bytes):
     pe_offset = parse_int(bin[0x3C:0x40])
     print(f"PE offset ({pe_offset:08x}):")
-    print(hexdump(bin, 0x3C, 4))
+    hexdump(bin, 0x3C, 4)
     print()
 
     print("MS-DOS Stub:")
-    print(hexdump(bin, 0, pe_offset))
+    hexdump(bin, 0, pe_offset)
     print()
 
     print("Signature (expected: 50 45 00 00):")
-    print(hexdump(bin, pe_offset, 4))
+    hexdump(bin, pe_offset, 4)
     print()
 
     print("COFF File Header:")
-    print(hexdump(bin, pe_offset + 4, 20))
+    hexdump(bin, pe_offset + 4, 20)
     print()
 
     coff = CoffHeader.parse(bin[pe_offset + 4 : pe_offset + 24])
@@ -355,7 +356,7 @@ def dump_pe32(bin: bytes):
     optional_standard = OptionalHeaderStandard.parse(bin[optional_header_offset:optional_header_offset+28])
     
     print("Optional Header Standard Fields:")
-    print(hexdump(bin, optional_header_offset, optional_standard.size))
+    hexdump(bin, optional_header_offset, optional_standard.size)
     print()
     print(optional_standard)
 
@@ -369,7 +370,7 @@ def dump_pe32(bin: bytes):
 
 
     print("Optional Header Windows-Specific Fields:")
-    print(hexdump(bin, optional_header_offset+24, 88))
+    hexdump(bin, optional_header_offset+24, 88)
     print()
     print(optional_windows)
 
@@ -379,7 +380,7 @@ def dump_pe32(bin: bytes):
     assert optional_windows.number_of_rva_and_sizes * 8 == optional_data_length
 
     print("Optional Header Data Directories:")
-    print(hexdump(bin, optional_data_offset, optional_data_length))
+    hexdump(bin, optional_data_offset, optional_data_length)
     print()
     directories = DataDirectories.parse(
         bin[optional_data_offset : optional_data_offset + optional_data_length]
@@ -392,7 +393,7 @@ def dump_pe32(bin: bytes):
         section = SectionHeader.parse(bin[current_offset : current_offset + 40])
         sections.append(section)
         print(section.name, "header:")
-        print(hexdump(bin, current_offset, 40))
+        hexdump(bin, current_offset, 40)
         print()
         print(section)
         current_offset += 40
@@ -403,7 +404,7 @@ def dump_pe32(bin: bytes):
 
     idata_addr = directories.find(".idata")
     print(".idata")
-    print(hexdump(memory, idata_addr.virtual_address, idata_addr.size))
+    hexdump(memory, idata_addr.virtual_address, idata_addr.size)
     print()
 
     imports_table = []
@@ -420,7 +421,7 @@ def dump_pe32(bin: bytes):
 
     # iat_addr = directories.find("IAT")
     # print("IAT")
-    # print(hexdump(memory, iat_addr.virtual_address, iat_addr.size))
+    # hexdump(memory, iat_addr.virtual_address, iat_addr.size)
     # print()
 
     # iat_table = []
@@ -437,7 +438,7 @@ def dump_pe32(bin: bytes):
 
     pdata_addr = directories.find(".pdata")
     print(".pdata\n")
-    # print(hexdump(memory, pdata_addr.virtual_address, pdata_addr.size))
+    # hexdump(memory, pdata_addr.virtual_address, pdata_addr.size)
     exceptions_table = []
 
     offset = pdata_addr.virtual_address
@@ -457,7 +458,7 @@ def dump_pe32(bin: bytes):
 
     reloc_addr = directories.find(".reloc")
     print(".reloc")
-    # print(hexdump(memory, reloc_addr.virtual_address, reloc_addr.size))
+    # hexdump(memory, reloc_addr.virtual_address, reloc_addr.size)
     print()
 
     relocations = Relocations.parse(memory[reloc_addr.virtual_address: reloc_addr.virtual_address + reloc_addr.size])
@@ -482,8 +483,25 @@ def is_macho(bin):
 
 def dump_macho(bin: bytes):
     print("Header")
-    print(hexdump(bin, 0, 0x20))
+    hexdump(bin, 0, 0x20)
 
+
+def is_mz(bin: bytes):
+    return bin.startswith(b"MZ")
+
+
+def dump_mz(bin: bytes):
+    mz_header = MzHeader.parse(bin[:28])
+    print("MZ Header")
+    hexdump(bin, 0, 28)
+    print(mz_header)
+
+    print("Remainder of the header")
+    hexdump(bin, 28, mz_header.header_size * 16 - 28)
+    print()
+
+    print("64 bytes after the header")
+    hexdump(bin, mz_header.header_size * 16, 64)
 
 
 with open(sys.argv[1], "rb") as f:
@@ -492,7 +510,9 @@ with open(sys.argv[1], "rb") as f:
 print(f"Total length: {len(bin)}")
 print()
 
-if is_pe32(bin):
+if is_mz(bin):
+    dump_mz(bin)
+elif is_pe32(bin):
     dump_pe32(bin)
 elif is_macho(bin):
     dump_macho(bin)

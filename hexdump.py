@@ -29,8 +29,6 @@ def hexdump(data: bytes, offset: int = 0, length: int = None):
                 s += " "
         s += "|"
 
-        lines.append(s)
+        print(s)
 
         p += 16
-
-    return "\n".join(lines)
