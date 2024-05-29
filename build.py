@@ -20,6 +20,7 @@ coff = pe.CoffHeader(
 
 optional_standard = pe.OptionalHeaderStandard()
 optional_windows = pe.OptionalHeaderWindows()
+data_directories = pe.DataDirectories([])
 
 bin = bytearray(mz_preamble)
 pe_signature_offset = len(bin)
@@ -30,6 +31,9 @@ optional_standard_offset = len(bin)
 bin += optional_standard.to_bytes()
 optional_windows_offset = len(bin)
 bin += optional_windows.to_bytes()
+data_directories_offset = len(bin)
+bin += data_directories.to_bytes()
+
 pad_offset = len(bin)
 padded_header_size = (len(bin) + 511) // 512 * 512
 bin += b"\0" * (padded_header_size - len(bin))
@@ -61,7 +65,12 @@ hexdump(
 print()
 
 print("Optional Header Windows Fields")
-hexdump(bin, optional_windows_offset, pad_offset - optional_windows_offset)
+hexdump(bin, optional_windows_offset, data_directories_offset - optional_windows_offset)
+print()
+
+print("Optional Header Data Directories")
+hexdump(bin, data_directories_offset, pad_offset - data_directories_offset)
+
 
 print()
 print("Everything:")

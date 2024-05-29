@@ -5,70 +5,8 @@ from typing import Self
 
 from hexdump import hexdump
 from parse import parse_int, parse_c_string
-from pe import CoffHeader, OptionalHeaderStandard, OptionalHeaderWindows
+from pe import CoffHeader, OptionalHeaderStandard, OptionalHeaderWindows, DataDirectories
 from mz import MzHeader
-
-
-@dataclass
-class ImageDataDirectory:
-    name: str
-    virtual_address: int
-    size: int
-
-    @staticmethod
-    def parse(name: str, data: bytes) -> Self:
-        assert len(data) == 8
-        return ImageDataDirectory(
-            name=name,
-            virtual_address=parse_int(data[0:4]),
-            size=parse_int(data[4:8]),
-        )
-
-    def __str__(self) -> str:
-        return f"{self.name}  {self.virtual_address:08x}-{self.virtual_address+self.size:08x} ({self.size})"
-
-
-DATA_DIRECTORIES = [
-    ".edata",
-    ".idata",
-    ".rsrc",
-    ".pdata",
-    "Certificate",
-    ".reloc",
-    ".debug",
-    "Reserved",
-    "Global",
-    ".tls",
-    "Load Config",
-    "Bound Import",
-    "IAT",
-    "Delay Import Descriptor",
-    ".cormeta",
-    "Reserved",
-]
-
-
-class DataDirectories:
-    def __init__(self, directories: list[ImageDataDirectory]):
-        self.directories = directories
-
-    @staticmethod
-    def parse(data: bytes) -> Self:
-        n = len(data) // 8
-        directories = []
-        for i in range(n):
-            name = DATA_DIRECTORIES[i]
-            directories.append(ImageDataDirectory.parse(name, data[i * 8 : i * 8 + 8]))
-        return DataDirectories(directories)
-
-    def __str__(self):
-        return "\n".join(str(d) for d in self.directories) + "\n"
-
-    def find(self, name: str) -> ImageDataDirectory | None:
-        for d in self.directories:
-            if d.name == name:
-                return d
-        return None
 
 
 SECTION_CHARACTERISTICS = [
@@ -510,9 +448,9 @@ with open(sys.argv[1], "rb") as f:
 print(f"Total length: {len(bin)}")
 print()
 
-if is_mz(bin):
-    dump_mz(bin)
-elif is_pe32(bin):
+if is_pe32(bin):
     dump_pe32(bin)
+elif is_mz(bin):
+    dump_mz(bin)
 elif is_macho(bin):
     dump_macho(bin)

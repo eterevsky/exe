@@ -278,3 +278,81 @@ NumberOfRvaAndSizes: {self.number_of_rva_and_sizes}
             self.loader_flags,
             self.number_of_rva_and_sizes,
         )
+
+
+@dataclass
+class ImageDataDirectory:
+    name: str
+    virtual_address: int
+    size: int
+
+    @staticmethod
+    def parse(name: str, data: bytes) -> Self:
+        assert len(data) == 8
+        virtual_address, size = struct.unpack("II", data)
+        return ImageDataDirectory(name, virtual_address, size)
+
+    def __str__(self) -> str:
+        return f"{self.name}  {self.virtual_address:08x}-{self.virtual_address+self.size:08x} ({self.size})"
+    
+    def to_bytes(self) -> bytes:
+        return struct.pack("II", self.virtual_address, self.size)
+
+
+DATA_DIRECTORIES = [
+    ".edata",
+    ".idata",
+    ".rsrc",
+    ".pdata",
+    "Certificate",
+    ".reloc",
+    ".debug",
+    "Reserved",
+    "Global",
+    ".tls",
+    "Load Config",
+    "Bound Import",
+    "IAT",
+    "Delay Import Descriptor",
+    ".cormeta",
+    "Reserved",
+]
+
+
+class DataDirectories:
+    def __init__(self, directories: list[ImageDataDirectory]):
+        self.directories = directories
+
+    @staticmethod
+    def parse(data: bytes) -> Self:
+        n = len(data) // 8
+        directories = []
+        for i in range(n):
+            name = DATA_DIRECTORIES[i]
+            directories.append(ImageDataDirectory.parse(name, data[i * 8 : i * 8 + 8]))
+        return DataDirectories(directories)
+
+    def __str__(self):
+        return "\n".join(str(d) for d in self.directories) + "\n"
+
+    def find(self, name: str) -> ImageDataDirectory | None:
+        for d in self.directories:
+            if d.name == name:
+                return d
+        return None
+    
+    def add_directory(self, name: str, virtual_address: int, size: int):
+        for i, dir_name in enumerate(DATA_DIRECTORIES):
+            if i >= len(self.directories):
+                self.directories.append(ImageDataDirectory(dir_name, 0, 0))
+            if name == dir_name:
+                directory = self.directories[i]
+                assert directory.virtual_address == 0
+                assert directory.size == 0
+                directory.virtual_address = virtual_address
+                directory.size = size
+                return
+            raise ValueError("Wrong directory name")
+    
+    def to_bytes(self) -> bytes:
+        return b"".join(d.to_bytes() for d in self.directories)
