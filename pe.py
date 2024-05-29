@@ -113,7 +113,6 @@ Characteristics: {self.characteristics}"""
 
 @dataclass
 class OptionalHeaderStandard:
-    start_offset: int = 0
     magic: int = 0x020B
     major_linker_version: int = 0
     minor_linker_version: int = 1
@@ -122,31 +121,18 @@ class OptionalHeaderStandard:
     size_of_uninitialized_data: int = 0
     address_of_entry_point: int = 0
     base_of_code: int = 0
+    base_of_data: int | None = None
 
     @staticmethod
-    def parse(bin: bytes, offset: int) -> Self:
-        (
-            magic,
-            major_linker_version,
-            minor_linker_version,
-            size_of_code,
-            size_of_initialized_data,
-            size_of_uninitialized_data,
-            address_of_entry_point,
-            base_of_code,
-        ) = struct.unpack("HBBIIIII", bin[offset : offset + 24])
+    def parse(data: bytes) -> Self:
+        fields = list(struct.unpack("HBBIIIII", data[:24]))
 
-        return OptionalHeaderStandard(
-            start_offset=offset,
-            magic=magic,
-            major_linker_version=major_linker_version,
-            minor_linker_version=minor_linker_version,
-            size_of_code=size_of_code,
-            size_of_initialized_data=size_of_initialized_data,
-            size_of_uninitialized_data=size_of_uninitialized_data,
-            address_of_entry_point=address_of_entry_point,
-            base_of_code=base_of_code,
-        )
+        if fields[0] == 0x020B:
+            fields.append(parse_int(data[24:28]))
+        else:
+            fields.append(None)
+
+        return OptionalHeaderStandard(*fields)
 
     def __str__(self):
         return f"""Magic: {self.magic:04x}
@@ -157,6 +143,10 @@ SizeOfUninitializedData: {self.size_of_uninitialized_data:08x} ({self.size_of_un
 AddressOfEntryPoint: {self.address_of_entry_point:08x}
 BaseOfCode: {self.base_of_code:08x}
 """
+
+    @property
+    def version(self):
+        return self.magic // 256
 
     @property
     def size(self):
@@ -174,4 +164,117 @@ BaseOfCode: {self.base_of_code:08x}
             self.size_of_uninitialized_data,
             self.address_of_entry_point,
             self.base_of_code,
+        )
+
+
+class WindowsSubsystem(Enum):
+    IMAGE_SUBSYSTEM_UNKNOWN = 0
+    IMAGE_SUBSYSTEM_NATIVE = 1
+    IMAGE_SUBSYSTEM_WINDOWS_GUI = 2
+    IMAGE_SUBSYSTEM_WINDOWS_CUI = 3
+    IMAGE_SUBSYSTEM_OS2_CUI = 5
+    IMAGE_SUBSYSTEM_POSIX_CUI = 7
+    IMAGE_SUBSYSTEM_NATIVE_WINDOWS = 8
+    IMAGE_SUBSYSTEM_WINDOWS_CE_GUI = 9
+    IMAGE_SUBSYSTEM_EFI_APPLICATION = 10
+    IMAGE_SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER = 11
+    IMAGE_SUBSYSTEM_EFI_RUNTIME_DRIVER = 12
+    IMAGE_SUBSYSTEM_EFI_ROM = 13
+    IMAGE_SUBSYSTEM_XBOX = 14
+    IMAGE_SUBSYSTEM_WINDOWS_BOOT_APPLICATION = 16
+
+
+class DllCharacteristics(Flag):
+    IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA = 0x0020
+    IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
+    IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY = 0x0080
+    IMAGE_DLLCHARACTERISTICS_NX_COMPAT = 0x0100
+    IMAGE_DLLCHARACTERISTICS_NO_ISOLATION = 0x0200
+    IMAGE_DLLCHARACTERISTICS_NO_SEH = 0x0400
+    IMAGE_DLLCHARACTERISTICS_NO_BIND = 0x0800
+    IMAGE_DLLCHARACTERISTICS_APPCONTAINER = 0x1000
+    IMAGE_DLLCHARACTERISTICS_WDM_DRIVER = 0x2000
+    IMAGE_DLLCHARACTERISTICS_GUARD_CF = 0x4000
+    IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE = 0x8000
+
+
+@dataclass
+class OptionalHeaderWindows:
+    image_base: int = 0x00400000
+    section_alignment: int = 4096
+    file_alignment: int = 512
+    major_operating_system_version: int = 6
+    minor_operating_system_version: int = 0
+    major_image_version: int = 0
+    minor_image_version: int = 0
+    major_subsystem_version: int = 6
+    minor_subsystem_version: int = 0
+    win32_version_value: int = 0
+    size_of_image: int = 0
+    size_of_headers: int = 0
+    check_sum: int = 0
+    subsystem: WindowsSubsystem = WindowsSubsystem.IMAGE_SUBSYSTEM_WINDOWS_CUI
+    dll_characteristics: DllCharacteristics = DllCharacteristics(0)
+    size_of_stack_reserve: int = 2**20
+    size_of_stack_commit: int = 4096
+    size_of_heap_reserve: int = 0
+    size_of_heap_commit: int = 0
+    loader_flags: int = 0
+    number_of_rva_and_sizes: int = 0
+
+    @staticmethod
+    def parse(data: bytes) -> Self:
+        assert len(data) == 88
+
+        fields = list(struct.unpack("QIIHHHHHHIIIIHHQQQQII", data))
+        fields[13] = WindowsSubsystem(fields[13])
+        fields[14] = DllCharacteristics(fields[14])
+
+        return OptionalHeaderWindows(*fields)
+
+    def __str__(self):
+        return f"""ImageBase: {self.image_base:016x}
+SectionAlignment: {self.section_alignment:08x}
+FileAlignment: {self.file_alignment:08x}
+OperatingSystemVersion: {self.major_operating_system_version}.{self.minor_operating_system_version}
+ImageVersion: {self.major_image_version}.{self.minor_image_version}
+SubsystemVersion: {self.major_subsystem_version}.{self.minor_subsystem_version}
+Win32VersionValue (should be 0): {self.win32_version_value:08x}
+SizeOfImage: {self.size_of_image:08x} ({self.size_of_image})
+SizeOfHeaders: {self.size_of_headers:08x} ({self.size_of_headers})
+CheckSum: {self.check_sum:08x}
+Subsystem: {self.subsystem}
+DllCharacteristics: {self.dll_characteristics}
+SizeOfStackReserve: {self.size_of_stack_reserve:016x} ({self.size_of_stack_reserve})
+SizeOfStackCommit: {self.size_of_stack_commit:016x} ({self.size_of_stack_commit})
+SizeOfHeapReserve: {self.size_of_heap_reserve:016x} ({self.size_of_heap_reserve})
+SizeOfHeapCommit: {self.size_of_heap_commit:016x} ({self.size_of_heap_commit})
+LoaderFlags (should be 0): {self.loader_flags:08x}
+NumberOfRvaAndSizes: {self.number_of_rva_and_sizes}
+"""
+
+    def to_bytes(self):
+        return struct.pack(
+            "QIIHHHHHHIIIIHHQQQQII",
+            self.image_base,
+            self.section_alignment,
+            self.file_alignment,
+            self.major_operating_system_version,
+            self.minor_operating_system_version,
+            self.major_image_version,
+            self.minor_image_version,
+            self.major_subsystem_version,
+            self.minor_subsystem_version,
+            self.win32_version_value,
+            self.size_of_image,
+            self.size_of_headers,
+            self.check_sum,
+            self.subsystem.value,
+            self.dll_characteristics.value,
+            self.size_of_stack_reserve,
+            self.size_of_stack_commit,
+            self.size_of_heap_reserve,
+            self.size_of_heap_commit,
+            self.loader_flags,
+            self.number_of_rva_and_sizes,
         )

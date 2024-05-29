@@ -18,25 +18,52 @@ coff = pe.CoffHeader(
 )
 
 optional_standard = pe.OptionalHeaderStandard()
+optional_windows = pe.OptionalHeaderWindows()
+
+bin = bytearray(MZ_PREAMBLE)
+pe_signature_offset = len(bin)
+bin += PE_SIGNATURE
+coff_offset = len(bin)
+bin += coff.to_bytes()
+optional_standard_offset = len(bin)
+bin += optional_standard.to_bytes()
+optional_windows_offset = len(bin)
+bin += optional_windows.to_bytes()
+pad_offset = len(bin)
+padded_header_size = (len(bin) + 511) // 512 * 512
+bin += b"\0" * (padded_header_size - len(bin))
+
+optional_windows.size_of_headers = len(bin)
+optional_windows_bytes = optional_windows.to_bytes()
+bin[
+    optional_standard_offset : optional_standard_offset + len(optional_windows_bytes)
+] = optional_windows_bytes
 
 print("MS-DOS stub")
-print(hexdump(MZ_PREAMBLE))
+print(hexdump(bin, 0, pe_signature_offset))
 print()
 
-bin = MZ_PREAMBLE
-l = len(bin)
-bin += PE_SIGNATURE
 print("PE signature")
-print(hexdump(bin, l))
+print(hexdump(bin, pe_signature_offset, coff_offset - pe_signature_offset))
 print()
 
-l = len(bin)
-bin += coff.to_bytes()
 print("COFF")
-print(hexdump(bin, l))
+print(hexdump(bin, coff_offset, optional_standard_offset - coff_offset))
 print()
 
-l = len(bin)
-bin += optional_standard.to_bytes()
 print("Optional Header Standard Fields")
-print(hexdump(bin, l))
+print(
+    hexdump(
+        bin,
+        optional_standard_offset,
+        optional_windows_offset - optional_standard_offset,
+    )
+)
+print()
+
+print("Optional Header Windows Fields")
+print(hexdump(bin, optional_windows_offset, pad_offset - optional_windows_offset))
+
+print()
+print("Everything:")
+print(hexdump(bin))

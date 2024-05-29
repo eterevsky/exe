@@ -5,123 +5,7 @@ from typing import Self
 
 from hexdump import hexdump
 from parse import parse_int, parse_c_string
-from pe import CoffHeader, OptionalHeaderStandard
-
-
-SUBSYSTEMS = {
-    0: "UNKNOWN",
-    1: "NATIVE",
-    2: "WINDOWS_GUI",
-    3: "WINDOWS_CUI",
-    5: "OS2_CUI",
-    7: "POSIX_CUI",
-    8: "NATIVE_WINDOWS",
-    9: "WINDOWS_CE_GUI",
-    10: "EFI_APPLICATION",
-    11: "EFI_BOOT_SERVICE_DRIVER",
-    12: "EFI_RUNTIME_DRIVER",
-    13: "EFI_ROM",
-    14: "XBOX",
-    16: "WINDOWS_BOOT_APPLICATION",
-}
-
-DLL_CHARACTERISTICS = [
-    (0x0001, "RESERVED"),
-    (0x0002, "RESERVED"),
-    (0x0004, "RESERVED"),
-    (0x0008, "RESERVED"),
-    (0x0020, "DLLCHARACTERISTICS_HIGH_ENTROPY_VA"),
-    (0x0040, "DLLCHARACTERISTICS_DYNAMIC_BASE"),
-    (0x0080, "DLLCHARACTERISTICS_FORCE_INTEGRITY"),
-    (0x0100, "DLLCHARACTERISTICS_NX_COMPAT"),
-    (0x0200, "DLLCHARACTERISTICS_NO_ISOLATION"),
-    (0x0400, "DLLCHARACTERISTICS_NO_SEH"),
-    (0x0800, "DLLCHARACTERISTICS_NO_BIND"),
-    (0x1000, "DLLCHARACTERISTICS_APPCONTAINER"),
-    (0x2000, "DLLCHARACTERISTICS_WDM_DRIVER"),
-    (0x4000, "DLLCHARACTERISTICS_GUARD_CF"),
-    (0x8000, "DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE"),
-]
-
-
-@dataclass
-class OptionalWindows:
-    image_base: int
-    section_alignment: int
-    file_alignment: int
-    major_operating_system_version: int
-    minor_operating_system_version: int
-    major_image_version: int
-    minor_image_version: int
-    major_subsystem_version: int
-    minor_subsystem_version: int
-    win32_version_value: int
-    size_of_image: int
-    size_of_headers: int
-    check_sum: int
-    subsystem: int
-    dll_characteristics: int
-    size_of_stack_reserve: int
-    size_of_stack_commit: int
-    size_of_heap_reserve: int
-    size_of_heap_commit: int
-    loader_flags: int
-    number_of_rva_and_sizes: int
-
-    def print_dll_characteristics(self) -> str:
-        selected = []
-        for flag, name in DLL_CHARACTERISTICS:
-            if self.dll_characteristics & flag:
-                selected.append(name)
-        return " | ".join(selected)
-
-    @staticmethod
-    def parse(data: bytes) -> Self:
-        assert len(data) == 88
-        return OptionalWindows(
-            image_base=parse_int(data[0:8]),
-            section_alignment=parse_int(data[8:12]),
-            file_alignment=parse_int(data[12:16]),
-            major_operating_system_version=parse_int(data[16:18]),
-            minor_operating_system_version=parse_int(data[18:20]),
-            major_image_version=parse_int(data[20:22]),
-            minor_image_version=parse_int(data[22:24]),
-            major_subsystem_version=parse_int(data[24:26]),
-            minor_subsystem_version=parse_int(data[26:28]),
-            win32_version_value=parse_int(data[28:32]),
-            size_of_image=parse_int(data[32:36]),
-            size_of_headers=parse_int(data[36:40]),
-            check_sum=parse_int(data[40:44]),
-            subsystem=parse_int(data[44:46]),
-            dll_characteristics=parse_int(data[46:48]),
-            size_of_stack_reserve=parse_int(data[48:56]),
-            size_of_stack_commit=parse_int(data[56:64]),
-            size_of_heap_reserve=parse_int(data[64:72]),
-            size_of_heap_commit=parse_int(data[72:80]),
-            loader_flags=parse_int(data[80:84]),
-            number_of_rva_and_sizes=parse_int(data[84:88]),
-        )
-
-    def __str__(self):
-        return f"""ImageBase: {self.image_base:016x}
-SectionAlignment: {self.section_alignment:08x}
-FileAlignment: {self.file_alignment:08x}
-OperatingSystemVersion: {self.major_operating_system_version}.{self.minor_operating_system_version}
-ImageVersion: {self.major_image_version}.{self.minor_image_version}
-SubsystemVersion: {self.major_subsystem_version}.{self.minor_subsystem_version}
-Win32VersionValue (should be 0): {self.win32_version_value:08x}
-SizeOfImage: {self.size_of_image:08x} ({self.size_of_image})
-SizeOfHeaders: {self.size_of_headers:08x} ({self.size_of_headers})
-CheckSum: {self.check_sum:08x}
-Subsystem: {self.subsystem:04x}  {SUBSYSTEMS.get(self.subsystem)}
-DllCharacteristics: {self.dll_characteristics:04x} {self.print_dll_characteristics()}
-SizeOfStackReserve: {self.size_of_stack_reserve:016x} ({self.size_of_stack_reserve})
-SizeOfStackCommit: {self.size_of_stack_commit:016x} ({self.size_of_stack_commit})
-SizeOfHeapReserve: {self.size_of_heap_reserve:016x} ({self.size_of_heap_reserve})
-SizeOfHeapCommit: {self.size_of_heap_commit:016x} ({self.size_of_heap_commit})
-LoaderFlags (should be 0): {self.loader_flags:08x}
-NumberOfRvaAndSizes: {self.number_of_rva_and_sizes}
-"""
+from pe import CoffHeader, OptionalHeaderStandard, OptionalHeaderWindows
 
 
 @dataclass
@@ -468,35 +352,29 @@ def dump_pe32(bin: bytes):
     assert coff.to_bytes() == bin[pe_offset + 4 : pe_offset + 24]
 
     optional_header_offset = pe_offset + 24
-    optional_standard = OptionalHeaderStandard.parse(bin, optional_header_offset)
+    optional_standard = OptionalHeaderStandard.parse(bin[optional_header_offset:optional_header_offset+28])
+    
     print("Optional Header Standard Fields:")
     print(hexdump(bin, optional_header_offset, optional_standard.size))
     print()
     print(optional_standard)
 
-    if optional_standard.magic not in (0x10B, 0x20B):
-        print(f"PE Magic Number: {optional_standard.magic:04x} - unsupported")
+    
+    if optional_standard.version != 2:
+        print(f"PE version unsupported")
         exit(0)
-    print()
 
-    optional_windows_offset = optional_header_offset + optional_standard.size
+    optional_windows = OptionalHeaderWindows.parse(
+        bin[optional_header_offset+24:optional_header_offset+112])
 
-    if optional_standard.magic == 0x10B:
-        optional_windows_length = 68
-        optional_data_offset = optional_header_offset + 96
-        optional_data_length = coff.size_of_optional_header - 96
-    else:
-        optional_windows_length = 88
-        optional_data_offset = optional_header_offset + 112
-        optional_data_length = coff.size_of_optional_header - 112
 
     print("Optional Header Windows-Specific Fields:")
-    print(hexdump(bin, optional_windows_offset, optional_windows_length))
+    print(hexdump(bin, optional_header_offset+24, 88))
     print()
-    optional_windows = OptionalWindows.parse(
-        bin[optional_windows_offset : optional_windows_offset + optional_windows_length]
-    )
     print(optional_windows)
+
+    optional_data_offset = optional_header_offset + 112
+    optional_data_length = coff.size_of_optional_header - 112
 
     assert optional_windows.number_of_rva_and_sizes * 8 == optional_data_length
 
