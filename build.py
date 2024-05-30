@@ -21,6 +21,19 @@ coff = pe.CoffHeader(
 optional_standard = pe.OptionalHeaderStandard()
 optional_windows = pe.OptionalHeaderWindows()
 data_directories = pe.DataDirectories([])
+optional_windows.number_of_rva_and_sizes = data_directories.num_dirs()
+
+text_section = pe.Section(".text")
+text_section.header.characteristics = (
+    pe.SectionFlags.IMAGE_SCN_CNT_CODE
+    | pe.SectionFlags.IMAGE_SCN_CNT_INITIALIZED_DATA
+    | pe.SectionFlags.IMAGE_SCN_MEM_EXECUTE
+    | pe.SectionFlags.IMAGE_SCN_MEM_READ
+    | pe.SectionFlags.IMAGE_SCN_MEM_WRITE
+)
+
+# By this point the objects for different headers are prepared and the only
+# parts to be updated are
 
 bin = bytearray(mz_preamble)
 pe_signature_offset = len(bin)
@@ -40,9 +53,9 @@ bin += b"\0" * (padded_header_size - len(bin))
 
 optional_windows.size_of_headers = len(bin)
 optional_windows_bytes = optional_windows.to_bytes()
-bin[
-    optional_windows_offset : optional_windows_offset + len(optional_windows_bytes)
-] = optional_windows_bytes
+bin[optional_windows_offset : optional_windows_offset + len(optional_windows_bytes)] = (
+    optional_windows_bytes
+)
 
 print("MS-DOS stub")
 hexdump(bin, 0, pe_signature_offset)
