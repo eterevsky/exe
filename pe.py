@@ -99,11 +99,15 @@ SizeOfOptionalHeader: {self.size_of_optional_header:04x}
 Characteristics: {self.characteristics}"""
 
     def to_bytes(self) -> bytes:
+        try:
+            timestamp = int(self.time_date_stamp.timestamp())
+        except OSError:
+            timestamp = int((self.time_date_stamp - datetime.fromtimestamp(0)).total_seconds())
         return struct.pack(
             "HHIIIHH",
             self.machine.value,
             self.number_of_sections,
-            int(self.time_date_stamp.timestamp()),
+            timestamp,
             self.pointer_to_symbol_table,
             self.number_of_symbols,
             self.size_of_optional_header,
@@ -352,7 +356,7 @@ class DataDirectories:
                 directory.virtual_address = virtual_address
                 directory.size = size
                 return
-            raise ValueError("Wrong directory name")
+        raise ValueError("Wrong directory name: " + name)
 
     def to_bytes(self) -> bytes:
         return b"".join(d.to_bytes() for d in self.directories)

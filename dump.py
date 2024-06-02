@@ -56,6 +56,7 @@ class ImportHint:
     def parse(memory: bytes, offset: int) -> Self:
         # hexdump(memory, offset, 32)
         # print()
+        # print("Hint:", memory[offset:offset+16])
         hint = parse_int(memory[offset:offset+2])
         name = parse_c_string(memory, offset+2)
         return ImportHint(hint, name)
@@ -83,6 +84,7 @@ class DllLookupTable:
 
         lookup_rva = entry.lookup_table_rva
         while True:
+            # print("Lookup entry:", memory[lookup_rva:lookup_rva+8])
             lookup_entry = parse_int(memory[lookup_rva:lookup_rva+8])
             if lookup_entry == 0:
                 break
@@ -250,7 +252,7 @@ def dump_pe32(bin: bytes):
     print()
 
     idata_addr = directories.find(".idata")
-    print(".idata")
+    print(".idata Import Directory Tables")
     hexdump(memory, idata_addr.virtual_address, idata_addr.size)
     print()
 
@@ -259,17 +261,21 @@ def dump_pe32(bin: bytes):
     for start in range(
         idata_addr.virtual_address, idata_addr.virtual_address + idata_addr.size, 20
     ):
-        dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
-        if dll_table is None:
+        dll_table_bytes = memory[start : start + 20]
+        if dll_table_bytes == b"\x00" * 20:
             break
+        dll_table = DllLookupTable.parse(memory[start : start + 20], memory)
+        print("Import Directory for", dll_table.name)
+        hexdump(memory, start, 20)
+        print()
         print(dll_table)
         imports_table.append(dll_table)
 
 
-    # iat_addr = directories.find("IAT")
-    # print("IAT")
-    # hexdump(memory, iat_addr.virtual_address, iat_addr.size)
-    # print()
+    iat_addr = directories.find("IAT")
+    print("IAT")
+    hexdump(memory, iat_addr.virtual_address, iat_addr.size)
+    print()
 
     # iat_table = []
 
@@ -284,32 +290,33 @@ def dump_pe32(bin: bytes):
 
 
     pdata_addr = directories.find(".pdata")
-    print(".pdata\n")
-    # hexdump(memory, pdata_addr.virtual_address, pdata_addr.size)
-    exceptions_table = []
+    if pdata_addr.size > 0:
+        print(".pdata\n")
+        # hexdump(memory, pdata_addr.virtual_address, pdata_addr.size)
+        exceptions_table = []
 
-    offset = pdata_addr.virtual_address
-    print("begin     end       unwind")
-    while offset < pdata_addr.virtual_address + pdata_addr.size:
-        begin = parse_int(memory[offset:offset+4])
-        end = parse_int(memory[offset+4:offset+8])
-        unwind = parse_int(memory[offset+8:offset+12])
-        print(f"{begin:08x}  {end:08x}  {unwind:08x}")
-        offset += 12
+        offset = pdata_addr.virtual_address
+        print("begin     end       unwind")
+        while offset < pdata_addr.virtual_address + pdata_addr.size:
+            begin = parse_int(memory[offset:offset+4])
+            end = parse_int(memory[offset+4:offset+8])
+            unwind = parse_int(memory[offset+8:offset+12])
+            print(f"{begin:08x}  {end:08x}  {unwind:08x}")
+            offset += 12
 
-        if offset - pdata_addr.virtual_address > 48:
-            print(". . .")
-            break
+            if offset - pdata_addr.virtual_address > 48:
+                print(". . .")
+                break
 
-    print()
+        print()
 
-    reloc_addr = directories.find(".reloc")
-    print(".reloc")
-    # hexdump(memory, reloc_addr.virtual_address, reloc_addr.size)
-    print()
+    # reloc_addr = directories.find(".reloc")
+    # print(".reloc")
+    # # hexdump(memory, reloc_addr.virtual_address, reloc_addr.size)
+    # print()
 
-    relocations = Relocations.parse(memory[reloc_addr.virtual_address: reloc_addr.virtual_address + reloc_addr.size])
-    print(relocations)
+    # relocations = Relocations.parse(memory[reloc_addr.virtual_address: reloc_addr.virtual_address + reloc_addr.size])
+    # print(relocations)
 
 
 def is_pe32(bin):
